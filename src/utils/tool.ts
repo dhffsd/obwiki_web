@@ -22,4 +22,24 @@ export class Tool {
                 children: Tool.arrayToTree(list, item.id)
             }));
     }
+
+    /**
+     * 递归查找所有子分类 id（包含自身）
+     * @param list 分类平铺数组
+     * @param id 当前分类 id
+     * @returns 所有子分类 id 数组
+     */
+    static getAllCategoryIds(list: any[], id: number): number[] {
+        const ids = [id];
+        function findChildren(parentId: number) {
+            list.forEach(item => {
+                if (item.parent === parentId) {
+                    ids.push(item.id);
+                    findChildren(item.id);
+                }
+            });
+        }
+        findChildren(id);
+        return ids;
+    }
 } 

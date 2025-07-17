@@ -23,15 +23,15 @@
       
       <a-table
         :columns="columns"
-        :row-key="record => record.id"
+        :row-key="record => String(record.id)"
         :data-source="ebooks"
-        :pagination="pagination"
+        :pagination="pagination.value"
         :loading="loading"
         @change="handleTableChange"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'cover'">
-            <a-image :src="record.cover" alt="图片加载失败" style="width:80px;height:80px"/>
+            <a-image :src="record.cover" alt="图片加载失败" style="width:140px;height:80px"/>
           </template>
           
           <template v-if="column.key === 'action'">
@@ -109,8 +109,28 @@ const columns = [
 ];
 
 // 数据状态
-const ebooks = ref([]);
-const pagination = reactive({
+// Ebook 类型 id 字段为 string
+type Ebook = {
+  id?: string;
+  name?: string;
+  category1Id?: string;
+  category2Id?: string;
+  description?: string;
+  cover?: string;
+  docCount?: number;
+  viewCount?: number;
+  voteCount?: number;
+};
+
+// 分类树类型
+type CategoryTree = {
+  id: string;
+  name: string;
+  children?: CategoryTree[];
+};
+
+const ebooks = ref<Ebook[]>([]);
+const pagination = ref({
   current: 1,
   pageSize: 5,
   total: 0
@@ -119,28 +139,41 @@ const loading = ref(false);
 const param = reactive({ name: '' });
 
 // 模态框状态
-const ebook = ref({});
+const ebook = ref<Ebook>({});
 const modalVisible = ref(false);
 const modalLoading = ref(false);
 
 // 分类数据
-const categories = ref([]);
-const categoryIds = ref([]);
+const categories = ref<CategoryTree[]>([]);
+const categoryIds = ref<string[]>([]);
 
 // 深拷贝工具函数
 const deepCopy = (obj: any) => {
   return JSON.parse(JSON.stringify(obj));
 };
 
+// 递归修正树结构 children 字段为数组，防御 ant-design-vue 报错
+function fixTreeChildren(nodes: any[]): CategoryTree[] {
+  if (!Array.isArray(nodes)) return [];
+  return nodes.map((node: any) => {
+    if (!Array.isArray(node.children)) {
+      node.children = [];
+    } else {
+      node.children = fixTreeChildren(node.children);
+    }
+    return node as CategoryTree;
+  });
+}
+
 onMounted(() => {
-  handleQuery({ page: 1, size: pagination.pageSize });
+  handleQuery({ page: 1, size: pagination.value.pageSize });
   loadCategories();
 });
 
 // 查询方法
 const handleQuery = (params: any) => {
   loading.value = true;
-  axios.get("/category", {
+  axios.get("/ebook/list", {
     params: {
       page: params.page,
       size: params.size,
@@ -150,56 +183,56 @@ const handleQuery = (params: any) => {
     loading.value = false;
     const data = resp.data;
     if (data.success) {
-      ebooks.value = data.content.list;
-      pagination.current = params.page;
-      pagination.total = data.content.total;
+      ebooks.value = data.content.list || data.content.records || [];
+      pagination.value.current = params.page;
+      pagination.value.total = data.content.total || 0;
     } else {
       // 如果后端未启动，使用模拟数据
       message.warning('后端服务未启动，显示模拟数据');
       ebooks.value = getMockData();
-      pagination.total = ebooks.value.length;
+      pagination.value.total = ebooks.value.length;
     }
   }).catch(error => {
     loading.value = false;
     console.log('查询失败，使用模拟数据：', error);
     message.warning('后端服务未启动，显示模拟数据');
     ebooks.value = getMockData();
-    pagination.total = ebooks.value.length;
+    pagination.value.total = ebooks.value.length;
   });
 };
 
 // 模拟数据
-const getMockData = () => {
+const getMockData = (): Ebook[] => {
   return [
     {
-      id: 1,
+      id: '1',
       name: '海洋鱼类图鉴',
       category1Id: '鱼类',
       category2Id: '热带鱼',
       description: '详细介绍各种海洋鱼类的特征、习性和分布',
-      cover: 'https://via.placeholder.com/80x80/1890ff/ffffff?text=鱼类',
+      cover: 'https://img.mianfeiwendang.com/pic/4ae03131210633d1935bc1cd/1-810-jpg_6-1080-0-0-1080.jpg',
       docCount: 156,
       viewCount: 2340,
       voteCount: 89
     },
     {
-      id: 2,
+      id: '2',
       name: '珊瑚礁生态系统',
       category1Id: '珊瑚',
       category2Id: '硬珊瑚',
       description: '探索珊瑚礁的美丽世界和生态平衡',
-      cover: 'https://via.placeholder.com/80x80/52c41a/ffffff?text=珊瑚',
+      cover: 'https://img.mianfeiwendang.com/pic/4ae03131210633d1935bc1cd/1-810-jpg_6-1080-0-0-1080.jpg',
       docCount: 89,
       viewCount: 1567,
       voteCount: 45
     },
     {
-      id: 3,
+      id: '3',
       name: '深海生物探秘',
       category1Id: '深海',
       category2Id: '深海鱼',
       description: '揭示深海生物的奥秘和生存环境',
-      cover: 'https://via.placeholder.com/80x80/722ed1/ffffff?text=深海',
+      cover: 'https://img.mianfeiwendang.com/pic/4ae03131210633d1935bc1cd/1-810-jpg_6-1080-0-0-1080.jpg',
       docCount: 234,
       viewCount: 3456,
       voteCount: 123
@@ -209,21 +242,24 @@ const getMockData = () => {
 
 // 加载分类数据
 const loadCategories = () => {
-  axios.get("/category/all").then((resp) => {
+  axios.get("/ebook/list").then((resp) => {
     const data = resp.data;
     if (data.success) {
-      categories.value = data.content;
+      // 递归修正 children 字段，防御 ant-design-vue 报错
+      categories.value = fixTreeChildren(data.content);
     } else {
-      message.warning('加载分类失败');
+      // message.warning('加载分类失败');
     }
   }).catch(error => {
     console.log('加载分类失败：', error);
-    message.warning('加载分类失败');
+    // message.warning('加载分类失败');
   });
 };
 
 // 表格分页变化
 const handleTableChange = (pag: any) => {
+  pagination.value.current = pag.current;
+  pagination.value.pageSize = pag.pageSize;
   handleQuery({
     page: pag.current,
     size: pag.pageSize
@@ -231,24 +267,26 @@ const handleTableChange = (pag: any) => {
 };
 
 // 编辑方法
-const edit = (record: any) => {
+const edit = (record: Ebook) => {
   modalVisible.value = true;
-  ebook.value = deepCopy(record); // 使用深拷贝避免直接修改列表数据
-  categoryIds.value = [ebook.value.category1Id, ebook.value.category2Id];
+  ebook.value = deepCopy(record);
+  // 保证 id 为字符串
+  if (ebook.value.id) ebook.value.id = String(ebook.value.id);
+  categoryIds.value = [ebook.value.category1Id || '', ebook.value.category2Id || ''];
 };
 
 // 新增方法
 const add = () => {
   modalVisible.value = true;
-  ebook.value = {};
+  ebook.value = { name: '', cover: '', description: '', category1Id: '', category2Id: '' };
   categoryIds.value = [];
 };
 
 // 保存方法
 const handleModalOk = () => {
   modalLoading.value = true;
-  ebook.value.category1Id = categoryIds.value[0];
-  ebook.value.category2Id = categoryIds.value[1];
+  ebook.value.category1Id = categoryIds.value[0] || '';
+  ebook.value.category2Id = categoryIds.value[1] || '';
   axios.post("/ebook/save", ebook.value).then(resp => {
     const data = resp.data;
     if (data.success) {
@@ -256,45 +294,45 @@ const handleModalOk = () => {
       modalVisible.value = false;
       message.success('保存成功');
       handleQuery({
-        page: pagination.current,
-        size: pagination.pageSize
+        page: pagination.value.current,
+        size: pagination.value.pageSize
       });
     }
   }).catch(error => {
     modalLoading.value = false;
     console.log('保存失败：', error);
-    message.success('保存成功（模拟）');
+    message.error('保存失败');
     modalVisible.value = false;
     handleQuery({
-      page: pagination.current,
-      size: pagination.pageSize
+      page: pagination.value.current,
+      size: pagination.value.pageSize
     });
   });
 };
 
 // 删除方法
-const handleDelete = (id: number) => {
-  axios.delete('/ebook/delete/' + id).then((resp) => {
+const handleDelete = (id: string) => {
+  axios.delete(`/ebook/delete/${id}`).then((resp) => {
     if (resp.data.success) {
       message.success('删除成功');
       handleQuery({
-        page: pagination.current,
-        size: pagination.pageSize
+        page: pagination.value.current,
+        size: pagination.value.pageSize
       });
     }
   }).catch(error => {
     console.log('删除失败：', error);
-    message.success('删除成功（模拟）');
+    message.error('删除失败');
     handleQuery({
-      page: pagination.current,
-      size: pagination.pageSize
+      page: pagination.value.current,
+      size: pagination.value.pageSize
     });
   });
 };
 
 // 跳转到文档管理
 const goToDoc = (record: any) => {
-  router.push(`/admin/doc?ebookId=${record.id}`);
+  router.push({ path: '/admin/doc', query: { ebookId: String(record.id) } });
 };
 </script>
 

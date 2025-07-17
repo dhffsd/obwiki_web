@@ -1,154 +1,146 @@
 <template>
-  <a-list :data-source="ebooks" :grid="{ gutter: 16, column: 3 }">
-    <template #renderItem="{ item }">
-      <a-list-item>
-        <a-card :title="item.name">
-          <template #cover>
-            <img :src="item.cover" alt="封面" style="width: 100px; height: 100px" />
-          </template>
-          <a-card-meta :description="item.description" />
-          <div class="stats">
-            <span class="stat-item"><eye-outlined style="margin-right:4px;" />{{ formatNumber(item.viewCount) }}</span>
-            <span class="stat-item"><like-outlined style="margin-right:4px;" />{{ formatNumber(item.voteCount) }}</span>
-          </div>
-          <div class="actions">
-            <a-button type="link" @click="goToDoc(item)">阅读</a-button>
-          </div>
-        </a-card>
-      </a-list-item>
-    </template>
-  </a-list>
+  <div>
+    <a-input v-model:value="name" placeholder="搜索电子书" @change="onSearch" style="width:200px;margin-bottom:16px;" />
+    <div class="ebook-list">
+      <div v-for="item in ebooks" :key="item.id" class="ebook-card">
+        <img :src="item.cover" alt="封面加载失败" class="ebook-cover" @click="showDetail(item)" style="cursor:pointer;" />
+        <div class="ebook-title" @click="showDetail(item)" style="cursor:pointer;">{{ item.name }}</div>
+        <div class="ebook-vote-bar">
+          <a-button type="primary" size="small" :disabled="item.liked" @click.stop="handleVote(item)">
+            <span v-if="item.liked">已点赞</span>
+            <span v-else>点赞</span>
+            <span style="margin-left:8px;">{{ item.voteCount || 0 }}</span>
+          </a-button>
+        </div>
+      </div>
+    </div>
+    <a-pagination
+      :current="page"
+      :pageSize="size"
+      :total="total"
+      @change="onPageChange"
+      @showSizeChange="onSizeChange"
+      style="margin-top:16px;text-align:right;"
+    />
+    <EbookDetail v-if="detailVisible" :ebookId="selectedEbookId" :visible="detailVisible" @close="detailVisible=false" />
+  </div>
 </template>
 
 <script lang="ts" setup>
-import { ref, watch } from 'vue';
-import { EyeOutlined, LikeOutlined } from '@ant-design/icons-vue';
+import { ref, watch, onMounted } from 'vue';
 import axios from 'axios';
-import { message } from 'ant-design-vue';
-import { useRouter } from 'vue-router';
+import EbookDetail from './EbookDetail.vue';
 
-const router = useRouter();
-const props = defineProps(['categoryId']);
-const ebooks = ref([]);
+const props = defineProps<{ categoryIds?: number[] }>();
 
-// 根据分类ID返回对应的电子书
-const getMockEbooksByCategory = (categoryId: number) => {
-  const allMockEbooks = [
-    {
-      id: 1,
-      name: '热带鱼图鉴',
-      description: '详细介绍各种热带鱼的美丽色彩和习性',
-      cover: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjMTg5MGZmIi8+Cjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+5Y2g5rW36Ieq54mHPC90ZXh0Pgo8L3N2Zz4K',
-      viewCount: 2340,
-      voteCount: 156
-    },
-    {
-      id: 2,
-      name: '冷水鱼生态',
-      description: '探索冷水鱼类的生存环境和特点',
-      cover: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjNTJjNDFhIi8+Cjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+5Y2g5rW35Y2g6YeR6Ieq54mHPC90ZXh0Pgo8L3N2Zz4K',
-      viewCount: 1567,
-      voteCount: 89
-    },
-    {
-      id: 3,
-      name: '硬珊瑚之美',
-      description: '欣赏硬珊瑚的美丽形态和生长过程',
-      cover: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjNzIyZWQxIi8+Cjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+5Y2g5rW36I2v546v6I2vPC90ZXh0Pgo8L3N2Zz4K',
-      viewCount: 3456,
-      voteCount: 234
-    },
-    {
-      id: 4,
-      name: '软珊瑚探秘',
-      description: '了解软珊瑚的柔美和生态价值',
-      cover: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjZmE4YzE2Ii8+Cjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+5Y2g5rW35Y2g6YeR546v6I2vPC90ZXh0Pgo8L3N2Zz4K',
-      viewCount: 2890,
-      voteCount: 178
-    },
-    {
-      id: 5,
-      name: '深海鱼类',
-      description: '探索深海鱼类的神秘世界',
-      cover: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjMTNjMmMyIi8+Cjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+5Y2g5rW35Y2g5rW36Ieq54mHPC90ZXh0Pgo8L3N2Zz4K',
-      viewCount: 4567,
-      voteCount: 345
-    },
-    {
-      id: 6,
-      name: '深海无脊椎动物',
-      description: '了解深海无脊椎动物的奇特形态',
-      cover: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgdmlld0JveD0iMCAwIDEwMCAxMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjZWIyZjk2Ii8+Cjx0ZXh0IHg9IjUwIiB5PSI1NSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+5Y2g5rW35Y2g5rW35LiA5qyh5a2p5a2pPC90ZXh0Pgo8L3N2Zz4K',
-      viewCount: 1234,
-      voteCount: 67
-    }
-  ];
+const ebooks = ref<any[]>([]);
+const total = ref(0);
+const page = ref(1);
+const size = ref(10);
+const name = ref('');
 
-  // 根据分类ID返回对应的电子书
-  const categoryEbookMap: { [key: number]: any[] } = {
-    2: [allMockEbooks[0]], // 热带鱼
-    3: [allMockEbooks[1]], // 冷水鱼
-    5: [allMockEbooks[2]], // 硬珊瑚
-    6: [allMockEbooks[3]], // 软珊瑚
-    8: [allMockEbooks[4]], // 深海鱼
-    9: [allMockEbooks[5]]  // 深海无脊椎动物
-  };
+const detailVisible = ref(false);
+const selectedEbookId = ref<number | string | null>(null);
 
-  return categoryEbookMap[categoryId] || [];
+const showDetail = (item: any) => {
+  selectedEbookId.value = item.id;
+  detailVisible.value = true;
 };
 
-// 加载电子书数据
-const loadEbooks = (categoryId: number) => {
-  axios.get('/ebook/list', {
-    params: {
-      categoryId2: categoryId,
-      page: 1,
-      size: 100
+const handleVote = async (item: any) => {
+  if (item.liked) return;
+  try {
+    // 调用后端点赞接口，获取最新点赞数
+    const res = await axios.post(`/ebook/vote/${item.id}`);
+    if (res.data && res.data.success && typeof res.data.content === 'number') {
+      item.voteCount = res.data.content;
+    } else {
+      item.voteCount = (item.voteCount || 0) + 1;
     }
-  }).then(res => {
-    ebooks.value = res.data.content.list;
-  }).catch(error => {
-    console.log('加载电子书失败，使用模拟数据：', error);
-    // 根据分类ID返回不同的模拟数据
-    const mockData = getMockEbooksByCategory(categoryId);
-    ebooks.value = mockData;
-  });
-};
-
-watch(() => props.categoryId, (newVal) => {
-  if (newVal) {
-    loadEbooks(newVal);
+    item.liked = true;
+  } catch (e) {
+    // 本地+1兜底
+    item.voteCount = (item.voteCount || 0) + 1;
+    item.liked = true;
   }
-}, { immediate: true });
-
-// 跳转到文档阅读页面
-const goToDoc = (item: any) => {
-  router.push(`/doc?ebookId=${item.id}`);
 };
 
-// 千分位格式化
-const formatNumber = (num: number) => {
-  if (typeof num !== 'number') return num;
-  return num.toLocaleString();
+const loadEbooks = async () => {
+  const params: any = {
+    page: page.value,
+    size: size.value,
+    name: name.value || undefined
+  };
+  if (props.categoryIds && props.categoryIds.length) {
+    params.categoryIds = props.categoryIds.join(',');
+  }
+  const res = await axios.get('/ebook/list', { params });
+  // 初始化每本书的 liked 状态
+  ebooks.value = (res.data.content.list || res.data.content.records || []).map((item: any) => ({ ...item, liked: false }));
+  total.value = res.data.content.total || 0;
 };
+
+const onPageChange = (p: number) => {
+  page.value = p;
+  loadEbooks();
+};
+const onSizeChange = (current: number, s: number) => {
+  size.value = s;
+  page.value = 1;
+  loadEbooks();
+};
+const onSearch = () => {
+  page.value = 1;
+  loadEbooks();
+};
+
+watch(() => props.categoryIds, () => {
+  page.value = 1;
+  loadEbooks();
+});
+
+onMounted(() => {
+  loadEbooks();
+});
 </script>
 
 <style scoped>
-.stats {
-  margin-top: 10px;
+.ebook-list {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 24px;
 }
-.stat-item {
+.ebook-card {
+  width: 180px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px #eee;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  font-size: 15px;
-  color: #666;
-  margin-right: 16px;
+  padding: 16px;
+  cursor: pointer;
+  transition: box-shadow 0.2s;
 }
-
-.actions {
-  margin-top: 10px;
+.ebook-card:hover {
+  box-shadow: 0 4px 16px #b2ebf2;
+}
+.ebook-cover {
+  width: 120px;
+  height: 160px;
+  object-fit: cover;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  background: #f5f5f5;
+}
+.ebook-title {
+  font-weight: bold;
+  font-size: 16px;
+  text-align: center;
+  color: #1890ff;
+}
+.ebook-vote-bar {
+  margin-top: 8px;
   text-align: center;
 }
 </style> 

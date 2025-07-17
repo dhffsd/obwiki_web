@@ -13,6 +13,12 @@ export default createStore({
       SessionStorage.set(USER_KEY, user);
     }
   },
+  getters: {
+    isAdmin(state) {
+      
+      return state.user && state.user.loginName === 'admin';
+    }
+  },
   actions: {},
   modules: {}
 });

@@ -1,14 +1,16 @@
 <template>
   <a-layout>
-    <the-header></the-header>
+    <the-header v-if="route.path !== '/login'"></the-header>
     <router-view/>
-    <the-footer></the-footer>
+    <the-footer v-if="route.path !== '/login'"></the-footer>
   </a-layout>
 </template>
 
 <script lang="ts" setup>
+import { useRoute } from 'vue-router';
 import TheHeader from '@/components/the-header.vue'
 import TheFooter from '@/components/the-footer.vue'
+const route = useRoute();
 </script>
 
 <style>

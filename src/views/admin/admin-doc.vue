@@ -5,11 +5,11 @@
         <a-col :span="6">
           <div class="left-panel">
             <div class="panel-header">
-              <h3>文档结构</h3>
-              <a-button type="primary" size="small" @click="add">新增文档</a-button>
+              <h3 v-if="ebookName">【{{ ebookName }}】文档结构</h3>
+              <h3 v-else-if="!ebookId">请先到【海洋生物种类管理】选择电子书</h3>
             </div>
             <a-table
-              v-if="level1.length > 0"
+              v-if="level1.length > 0 && ebookId"
               :columns="columns"
               :data-source="level1"
               :row-key="record => record.id"
@@ -38,7 +38,7 @@
             <div class="panel-header">
               <h3>文档编辑</h3>
             </div>
-            <a-form :model="doc" layout="vertical">
+            <a-form v-if="ebookId" :model="doc" layout="vertical">
               <a-row :gutter="16">
                 <a-col :span="12">
                   <a-form-item label="文档名称">
@@ -73,10 +73,10 @@
               <a-form-item>
                 <a-space>
                   <a-button type="primary" @click="handleSave">保存文档</a-button>
-                  <a-button @click="add">新增文档</a-button>
                 </a-space>
               </a-form-item>
             </a-form>
+            <div v-else style="color:#888;text-align:center;padding:40px 0;">请先从【海洋生物种类管理】进入文档管理</div>
           </div>
         </a-col>
       </a-row>
@@ -93,6 +93,7 @@ import { Tool } from '@/utils/tool';
 
 const route = useRoute();
 const ebookId = route.query.ebookId;
+const ebookName = ref('');
 
 const columns = [
   { title: '名称', dataIndex: 'name' },
@@ -112,10 +113,20 @@ const doc = ref({
 });
 
 onMounted(() => {
-  handleQuery();
+  if (ebookId) {
+    axios.get(`/ebook/find/${ebookId}`).then(res => {
+      if (res.data.success && res.data.content && res.data.content.name) {
+        ebookName.value = res.data.content.name;
+      } else {
+        ebookName.value = '';
+      }
+    });
+    handleQuery();
+  }
 });
 
 const handleQuery = () => {
+  if (!ebookId) return;
   loading.value = true;
   axios.get("/doc/all", { params: { ebookId: ebookId } }).then(res => {
     loading.value = false;
@@ -123,35 +134,14 @@ const handleQuery = () => {
     if (data.success) {
       level1.value = Tool.arrayToTree(data.content, 0);
       treeSelectData.value = Tool.copy(level1.value);
-      treeSelectData.value.unshift({ id: 0, name: '无' });
+      treeSelectData.value.unshift({ id: 0, name: '无', children: [] });
+      fixChildrenArray(treeSelectData.value);
     }
   }).catch(error => {
     loading.value = false;
-    console.log('加载文档失败，使用模拟数据：', error);
-    // 使用模拟数据
-    const mockData = [
-      { id: 1, name: '第一章 海洋生物概述', parent: 0, sort: 1 },
-      { id: 2, name: '1.1 海洋生态系统', parent: 1, sort: 1 },
-      { id: 3, name: '1.2 海洋生物分类', parent: 1, sort: 2 },
-      { id: 4, name: '第二章 鱼类', parent: 0, sort: 2 },
-      { id: 5, name: '2.1 热带鱼', parent: 4, sort: 1 },
-      { id: 6, name: '2.2 冷水鱼', parent: 4, sort: 2 }
-    ];
-    level1.value = Tool.arrayToTree(mockData, 0);
-    treeSelectData.value = Tool.copy(level1.value);
-    treeSelectData.value.unshift({ id: 0, name: '无' });
+    console.log('加载文档失败：', error);
+    // 移除模拟数据，不再赋值 level1/treeSelectData
   });
-};
-
-const add = () => {
-  doc.value = {
-    id: undefined,
-    ebookId: ebookId,
-    parent: 0,
-    name: '',
-    sort: 0,
-    content: ''
-  };
 };
 
 const edit = (record: any) => {
@@ -172,6 +162,15 @@ const handleSave = () => {
   axios.post("/doc/save", doc.value).then(res => {
     if (res.data.success) {
       message.success('保存成功');
+      // 保存成功后清空表单
+      doc.value = {
+        id: undefined,
+        ebookId: ebookId,
+        parent: 0,
+        name: '',
+        sort: 0,
+        content: ''
+      };
       handleQuery();
     }
   }).catch(error => {
@@ -193,6 +192,15 @@ const handleDelete = (id: number) => {
     handleQuery();
   });
 };
+
+// 终极防御式递归修正所有节点 children 字段为数组
+function fixChildrenArray(nodes) {
+  if (!Array.isArray(nodes)) return;
+  nodes.forEach(node => {
+    node.children = Array.isArray(node.children) ? node.children : [];
+    fixChildrenArray(node.children);
+  });
+}
 </script>
 
 <style scoped>
